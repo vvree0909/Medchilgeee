@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Гараар Зурах</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0f;
+  font-family: 'Courier New', monospace;
+  color: #00ffff;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: rgba(0,255,255,0.04);
+  border-bottom: 1px solid rgba(0,255,255,0.15);
+  flex-shrink: 0;
+}
+#header h1 { font-size: 0.9rem; letter-spacing: 0.3em; text-shadow: 0 0 15px #00ffff; }
+#controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn {
+  background: transparent;
+  border: 1px solid rgba(0,255,255,0.4);
+  color: #00ffff;
+  padding: 4px 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.7rem;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  transition: all 0.2s;
+}
+.btn:hover { background: rgba(0,255,255,0.15); }
+.btn.active { background: rgba(0,255,255,0.2); border-color: #00ffff; }
+#color-row { display: flex; gap: 6px; align-items: center; }
+.color-dot {
+  width: 18px; height: 18px; border-radius: 50%;
+  cursor: pointer; border: 2px solid transparent; transition: all 0.2s;
+}
+.color-dot:hover, .color-dot.active { border-color: white; transform: scale(1.2); }
+#brush-size { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; opacity: 0.7; }
+#brush-size input { width: 70px; accent-color: #00ffff; }
+#main { flex: 1; position: relative; overflow: hidden; }
+#cam {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  opacity: 0.18;
+  pointer-events: none;
+}
+#draw-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+#overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+#debug {
+  position: absolute;
+  top: 10px; left: 10px;
+  background: rgba(0,0,0,0.85);
+  border: 1px solid rgba(0,255,255,0.3);
+  padding: 10px 14px;
+  font-size: 0.65rem;
+  line-height: 2;
+  z-index: 100;
+  min-width: 260px;
+}
+.ok { color: #6bcb77; }
+.err { color: #ff6b6b; }
+.warn { color: #ffd93d; }
+.info { color: #00ffff; }
+
+#status {
+  position: absolute;
+  bottom: 12px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  background: rgba(0,0,0,0.6);
+  padding: 4px 14px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#gesture-info {
+  position: absolute;
+  bottom: 40px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  opacity: 0.5;
+  pointer-events: none;
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>✋ ГАРААР ЗУРАХ</h1>
+  <div id="controls">
+    <div id="color-row">
+      <div class="color-dot active" style="background:#00ffff" data-color="#00ffff"></div>
+      <div class="color-dot" style="background:#ff6b6b" data-color="#ff6b6b"></div>
+      <div class="color-dot" style="background:#ffd93d" data-color="#ffd93d"></div>
+      <div class="color-dot" style="background:#6bcb77" data-color="#6bcb77"></div>
+      <div class="color-dot" style="background:#ff9ef7" data-color="#ff9ef7"></div>
+      <div class="color-dot" style="background:#ffffff" data-color="#ffffff"></div>
+    </div>
+    <div id="brush-size">
+      <span>📏</span>
+      <input type="range" id="brush" min="2" max="40" value="8">
+    </div>
+    <button class="btn active" id="btn-debug">🔍 DEBUG</button>
+    <button class="btn" id="btn-erase">⬜ АРИЛГАГЧ</button>
+    <button class="btn" id="btn-clear">🗑 ЦЭВЭРЛЭХ</button>
+    <button class="btn" id="btn-save">💾 ХАДГАЛАХ</button>
+  </div>
+</div>
+
+<div id="main">
+  <video id="cam" autoplay playsinline muted></video>
+  <canvas id="draw-canvas"></canvas>
+  <canvas id="overlay-canvas"></canvas>
+
+  <div id="debug">
+    <div>📷 Камер: <span id="d-cam" class="warn">хүлээж байна...</span></div>
+    <div>📦 MediaPipe: <span id="d-mp" class="warn">ачааллаж байна...</span></div>
+    <div>🖐 Гар: <span id="d-hand" class="warn">илрээгүй</span></div>
+    <div>☝️ Хуруу: <span id="d-fingers" class="info">-</span></div>
+    <div>📍 Байрлал: <span id="d-pos" class="info">-</span></div>
+    <div>🎨 Үйлдэл: <span id="d-action" class="info">-</span></div>
+  </div>
+
+  <div id="status">Ачааллаж байна...</div>
+  <div id="gesture-info">☝️ Нэг хуруу = зур &nbsp;|&nbsp; ✌️ Хоёр+ = зогсоо &nbsp;|&nbsp; ✊ Нударга = арилга</div>
+</div>
+
+<script>
+const video = document.getElementById('cam');
+const drawCanvas = document.getElementById('draw-canvas');
+const dCtx = drawCanvas.getContext('2d');
+const overlayCanvas = document.getElementById('overlay-canvas');
+const oCtx = overlayCanvas.getContext('2d');
+const statusEl = document.getElementById('status');
+
+let W, H;
+let currentColor = '#00ffff';
+let brushSize = 8;
+let isErasing = false;
+let drawing = false;
+let lastX = null, lastY = null;
+
+function sd(id, text, cls) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = text; el.className = cls || 'info'; }
+}
+
+function resize() {
+  const main = document.getElementById('main');
+  W = main.clientWidth; H = main.clientHeight;
+  drawCanvas.width = W; drawCanvas.height = H;
+  overlayCanvas.width = W; overlayCanvas.height = H;
+}
+resize();
+window.addEventListener('resize', resize);
+
+document.querySelectorAll('.color-dot').forEach(dot => {
+  dot.addEventListener('click', () => {
+    document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+    dot.classList.add('active');
+    currentColor = dot.dataset.color;
+    isErasing = false;
+    document.getElementById('btn-erase').classList.remove('active');
+  });
+});
+document.getElementById('brush').addEventListener('input', e => { brushSize = parseInt(e.target.value); });
+document.getElementById('btn-erase').addEventListener('click', () => {
+  isErasing = !isErasing;
+  document.getElementById('btn-erase').classList.toggle('active', isErasing);
+});
+document.getElementById('btn-clear').addEventListener('click', () => dCtx.clearRect(0,0,W,H));
+document.getElementById('btn-debug').addEventListener('click', () => {
+  const dbg = document.getElementById('debug');
+  const visible = dbg.style.display !== 'none';
+  dbg.style.display = visible ? 'none' : 'block';
+  document.getElementById('btn-debug').classList.toggle('active', !visible);
+});
+document.getElementById('btn-save').addEventListener('click', () => {
+  const tmp = document.createElement('canvas');
+  tmp.width = W; tmp.height = H;
+  const t = tmp.getContext('2d');
+  t.fillStyle = '#0a0a0f'; t.fillRect(0,0,W,H);
+  t.drawImage(drawCanvas,0,0);
+  const a = document.createElement('a');
+  a.download = 'drawing.png'; a.href = tmp.toDataURL(); a.click();
+});
+
+// Particles
+const particles = [];
+function spawnP(x, y) {
+  for (let i=0; i<3; i++) particles.push({
+    x, y, vx:(Math.random()-.5)*4, vy:(Math.random()-.5)*4-1,
+    life:1, color:currentColor, size:2+Math.random()*3
+  });
+}
+function tickP() {
+  for (let i=particles.length-1; i>=0; i--) {
+    const p=particles[i]; p.x+=p.vx; p.y+=p.vy; p.vy+=0.05; p.life-=0.04;
+    if (p.life<=0) particles.splice(i,1);
+  }
+}
+function drawP() {
+  particles.forEach(p => {
+    oCtx.globalAlpha = p.life*.7;
+    oCtx.fillStyle = p.color;
+    oCtx.beginPath(); oCtx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); oCtx.fill();
+  });
+  oCtx.globalAlpha = 1;
+}
+
+function drawLine(x1,y1,x2,y2) {
+  dCtx.globalCompositeOperation = isErasing ? 'destination-out' : 'source-over';
+  dCtx.strokeStyle = isErasing ? 'rgba(0,0,0,1)' : currentColor;
+  dCtx.lineWidth = isErasing ? brushSize*3 : brushSize;
+  dCtx.lineCap = 'round'; dCtx.lineJoin = 'round';
+  dCtx.shadowColor = isErasing ? 'transparent' : currentColor;
+  dCtx.shadowBlur = isErasing ? 0 : brushSize*.8;
+  dCtx.beginPath(); dCtx.moveTo(x1,y1); dCtx.lineTo(x2,y2); dCtx.stroke();
+  dCtx.shadowBlur = 0; dCtx.globalCompositeOperation = 'source-over';
+  if (!isErasing) spawnP(x2,y2);
+}
+
+function drawCursor(x,y,col) {
+  const c = col || currentColor;
+  oCtx.strokeStyle = c; oCtx.lineWidth = 2;
+  oCtx.globalAlpha = .9; oCtx.shadowColor = c; oCtx.shadowBlur = 10;
+  oCtx.beginPath(); oCtx.arc(x,y,isErasing?brushSize*1.5:brushSize/2+5,0,Math.PI*2); oCtx.stroke();
+  oCtx.globalAlpha = .4; oCtx.fillStyle = c;
+  oCtx.beginPath(); oCtx.arc(x,y,3,0,Math.PI*2); oCtx.fill();
+  oCtx.globalAlpha = 1; oCtx.shadowBlur = 0;
+}
+
+const CONN = [
+  [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]
+];
+function drawSkeleton(lms) {
+  const pts = lms.map(lm => ({x:(1-lm.x)*W, y:lm.y*H}));
+  oCtx.strokeStyle = 'rgba(0,255,255,0.35)'; oCtx.lineWidth = 1.5;
+  CONN.forEach(([a,b]) => {
+    oCtx.beginPath(); oCtx.moveTo(pts[a].x,pts[a].y); oCtx.lineTo(pts[b].x,pts[b].y); oCtx.stroke();
+  });
+  pts.forEach((p,i) => {
+    const tip = [4,8,12,16,20].includes(i);
+    oCtx.beginPath(); oCtx.arc(p.x,p.y,tip?5:3,0,Math.PI*2);
+    oCtx.fillStyle = tip ? 'rgba(255,255,255,.9)' : 'rgba(0,255,255,.6)'; oCtx.fill();
+  });
+}
+
+function countFingers(lms) {
+  let n = [[8,6],[12,10],[16,14],[20,18]].filter(([t,p]) => lms[t].y < lms[p].y).length;
+  if (lms[4].x > lms[3].x) n++;
+  return n;
+}
+
+function loadScript(src) {
+  return new Promise((res,rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.crossOrigin = 'anonymous';
+    s.onload = res; s.onerror = () => rej(new Error('CDN амжилтгүй: ' + src.split('/').pop()));
+    document.head.appendChild(s);
+  });
+}
+
+async function initMP() {
+  try {
+    sd('d-mp','hands.js татаж байна...','warn');
+    await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js');
+    sd('d-mp','camera_utils татаж байна...','warn');
+    await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js');
+
+    if (typeof Hands === 'undefined') throw new Error('Hands class олдсонгүй');
+    if (typeof Camera === 'undefined') throw new Error('Camera class олдсонгүй');
+
+    sd('d-mp','Model тохируулж байна...','warn');
+
+    const hands = new Hands({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`
+    });
+    hands.setOptions({ maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.65, minTrackingConfidence:0.5 });
+
+    hands.onResults(results => {
+      oCtx.clearRect(0,0,W,H); drawP(); tickP();
+
+      if (!results.multiHandLandmarks?.length) {
+        sd('d-hand','Илрээгүй','warn');
+        sd('d-fingers','-','info'); sd('d-pos','-','info'); sd('d-action','-','info');
+        statusEl.textContent = '👋 Гараа үзүүлнэ үү...';
+        drawing = false; lastX = null; return;
+      }
+
+      const lms = results.multiHandLandmarks[0];
+      sd('d-hand','✅ Илрүүлэгдлээ','ok');
+
+      const f = countFingers(lms);
+      sd('d-fingers', f + ' хуруу', 'ok');
+
+      const tip = lms[8];
+      const x = (1-tip.x)*W, y = tip.y*H;
+      sd('d-pos', `${Math.round(x)}, ${Math.round(y)}`, 'info');
+
+      drawSkeleton(lms);
+
+      if (f === 1) {
+        sd('d-action','✏️ Зурж байна','ok');
+        statusEl.textContent = '✏️ Зурж байна...';
+        drawCursor(x,y,currentColor);
+        if (drawing && lastX !== null) drawLine(lastX,lastY,x,y);
+        drawing = true; lastX = x; lastY = y;
+      } else if (f === 0) {
+        sd('d-action','✊ Арилгаж байна','warn');
+        statusEl.textContent = '✊ Арилгаж байна...';
+        const ex=(1-lms[9].x)*W, ey=lms[9].y*H;
+        dCtx.globalCompositeOperation='destination-out';
+        dCtx.beginPath(); dCtx.arc(ex,ey,35,0,Math.PI*2);
+        dCtx.fillStyle='rgba(0,0,0,1)'; dCtx.fill();
+        dCtx.globalCompositeOperation='source-over';
+        drawing=false; lastX=null;
+      } else {
+        sd('d-action',`⏸ Зогссон (${f} хуруу)`,'info');
+        statusEl.textContent = '✌️ Зогссон';
+        drawing=false; lastX=null;
+        drawCursor(x,y,'rgba(0,255,255,0.35)');
+      }
+    });
+
+    const camera = new Camera(video, {
+      onFrame: async () => { await hands.send({image:video}); },
+      width:640, height:480
+    });
+    await camera.start();
+    sd('d-mp','✅ Бэлэн!','ok');
+    statusEl.textContent = '✅ Бэлэн — гараа үзүүлнэ үү!';
+
+  } catch(e) {
+    sd('d-mp','❌ ' + e.message,'err');
+    statusEl.textContent = '❌ ' + e.message;
+    console.error(e);
+    setTimeout(fallback, 300);
+  }
+}
+
+function fallback() {
+  statusEl.textContent = '⚠️ Хулгана/хуруугаар зурна уу';
+  sd('d-mp','⚠️ Fallback горим','warn');
+
+  function pos(e) {
+    const r = drawCanvas.getBoundingClientRect();
+    const src = e.touches ? e.touches[0] : e;
+    return { x: src.clientX-r.left, y: src.clientY-r.top };
+  }
+  drawCanvas.addEventListener('mousedown', e => { drawing=true; const p=pos(e); lastX=p.x; lastY=p.y; });
+  drawCanvas.addEventListener('mousemove', e => {
+    if(!drawing) return;
+    const p=pos(e); drawLine(lastX,lastY,p.x,p.y); lastX=p.x; lastY=p.y;
+    oCtx.clearRect(0,0,W,H); drawP(); tickP(); drawCursor(p.x,p.y);
+  });
+  drawCanvas.addEventListener('mouseup', () => { drawing=false; });
+  drawCanvas.addEventListener('mouseleave', () => { drawing=false; oCtx.clearRect(0,0,W,H); });
+  drawCanvas.addEventListener('touchstart', e=>{e.preventDefault();drawing=true;const p=pos(e);lastX=p.x;lastY=p.y;},{passive:false});
+  drawCanvas.addEventListener('touchmove', e=>{
+    e.preventDefault(); if(!drawing)return;
+    const p=pos(e); drawLine(lastX,lastY,p.x,p.y); lastX=p.x; lastY=p.y;
+    oCtx.clearRect(0,0,W,H); drawP(); tickP(); drawCursor(p.x,p.y);
+  },{passive:false});
+  drawCanvas.addEventListener('touchend',()=>{drawing=false;});
+}
+
+async function start() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}});
+    video.srcObject = stream;
+    await new Promise(r => { video.onloadedmetadata = r; });
+    sd('d-cam','✅ Нээгдлээ','ok');
+    statusEl.textContent = 'MediaPipe ачааллаж байна...';
+    await initMP();
+  } catch(e) {
+    sd('d-cam','❌ ' + e.message,'err');
+    statusEl.textContent = '❌ Камер: ' + e.message;
+    fallback();
+  }
+}
+
+start();
+</script>
+</body>
+</html>
